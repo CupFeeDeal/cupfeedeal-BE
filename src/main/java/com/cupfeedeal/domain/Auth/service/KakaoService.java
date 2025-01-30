@@ -1,0 +1,134 @@
+package com.cupfeedeal.domain.Auth.service;
+
+import com.cupfeedeal.domain.Auth.dto.responseDto.KakaoTokenResponseDto;
+import com.cupfeedeal.domain.Auth.dto.responseDto.KakaoUserInfoResponseDto;
+import com.cupfeedeal.domain.User.entity.User;
+import com.cupfeedeal.domain.User.repository.UserRepository;
+import com.cupfeedeal.global.exception.ApplicationException;
+import com.cupfeedeal.global.exception.ExceptionCode;
+import io.netty.handler.codec.http.HttpHeaderValues;
+import jakarta.servlet.http.HttpServletRequest;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatusCode;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.stereotype.Service;
+import org.springframework.web.reactive.function.client.WebClient;
+import reactor.core.publisher.Mono;
+
+@Slf4j
+@RequiredArgsConstructor
+@Service
+public class KakaoService {
+
+    private String clientId;
+    private final String KAUTH_TOKEN_URL_HOST;
+    private final String KAUTH_USER_URL_HOST;
+    private final String KAUTH_UNLINK_URL;
+    private final String KAUTH_USER_INFO_URL;
+    private UserRepository userRepository;
+    private String adminKey;
+
+    @Autowired
+    public KakaoService(@Value("${spring.kakao.client_id}") String clientId, UserRepository userRepository, @Value("${spring.kakao.admin_key}") String adminKey) {
+        this.clientId = clientId;
+        KAUTH_TOKEN_URL_HOST ="https://kauth.kakao.com";
+        KAUTH_USER_URL_HOST = "https://kapi.kakao.com";
+        KAUTH_UNLINK_URL = "https://kapi.kakao.com/v1/user/unlink";
+        KAUTH_USER_INFO_URL = "https://kapi.kakao.com/v2/user/me";
+        this.userRepository = userRepository;
+        this.adminKey = adminKey;
+    }
+
+    public String getAccessTokenFromKakao(String code, String redirectUri) {
+        KakaoTokenResponseDto kakaoTokenResponseDto = WebClient.create(KAUTH_TOKEN_URL_HOST).post()
+                .uri(uriBuilder -> uriBuilder
+                        .scheme("https")
+                        .path("/oauth/token")
+                        .queryParam("grant_type", "authorization_code")
+                        .queryParam("client_id", clientId)
+                        .queryParam("code", code)
+                        .queryParam("redirect_uri", redirectUri)
+                        .build(true))
+                .header(HttpHeaders.CONTENT_TYPE, HttpHeaderValues.APPLICATION_X_WWW_FORM_URLENCODED.toString())
+                .retrieve()
+                .onStatus(HttpStatusCode::is4xxClientError, clientResponse ->
+                        Mono.error(new RuntimeException(ExceptionCode.INVALID_VALUE_EXCEPTION.getMessage()))
+                )
+                .onStatus(HttpStatusCode::is5xxServerError, clientResponse ->
+                        Mono.error(new RuntimeException(ExceptionCode.INTERNAL_SERVER_ERROR.getMessage()))
+                )
+                .bodyToMono(KakaoTokenResponseDto.class)
+                .block();
+
+//        log.info(" [Kakao Service] Access Token ------> {}", kakaoTokenResponseDto.getAccessToken());
+//        log.info(" [Kakao Service] Refresh Token ------> {}", kakaoTokenResponseDto.getRefreshToken());
+//        //제공 조건: OpenID Connect가 활성화 된 앱의 토큰 발급 요청인 경우 또는 scope에 openid를 포함한 추가 항목 동의 받기 요청을 거친 토큰 발급 요청인 경우
+//        log.info(" [Kakao Service] Id Token ------> {}", kakaoTokenResponseDto.getIdToken());
+//        log.info(" [Kakao Service] Scope ------> {}", kakaoTokenResponseDto.getScope());
+
+        return kakaoTokenResponseDto.getAccessToken();
+    }
+
+    public KakaoUserInfoResponseDto getUserInfo(String accessToken) {
+
+        KakaoUserInfoResponseDto userInfo = WebClient.create(KAUTH_USER_URL_HOST)
+                .get()
+                .uri(uriBuilder -> uriBuilder
+                        .scheme("https")
+                        .path("/v2/user/me")
+                        .build(true))
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
+                .header(HttpHeaders.CONTENT_TYPE, HttpHeaderValues.APPLICATION_X_WWW_FORM_URLENCODED.toString())
+                .retrieve()
+                .onStatus(HttpStatusCode::is4xxClientError, clientResponse ->
+                        Mono.error(new RuntimeException(ExceptionCode.INVALID_VALUE_EXCEPTION.getMessage()))
+                )
+                .onStatus(HttpStatusCode::is5xxServerError, clientResponse ->
+                        Mono.error(new RuntimeException(ExceptionCode.INTERNAL_SERVER_ERROR.getMessage()))
+                )
+                .bodyToMono(KakaoUserInfoResponseDto.class)
+                .block();
+
+//        log.info("[ Kakao Service ] Auth ID ---> {} ", userInfo.getId());
+//        log.info("[ Kakao Service ] NickName ---> {} ", userInfo.getKakaoAccount().getProfile().getNickname());
+
+        return userInfo;
+    }
+
+    public void unlinkKakaoAccount(Long kakaoUserId) {
+
+        try{
+
+            log.info("카카오 강제 연결 끊기 요청 - kakaoUserId: {}", kakaoUserId);
+
+            String response = WebClient.create()
+                    .post()
+                    .uri(KAUTH_UNLINK_URL)
+                    .header(HttpHeaders.AUTHORIZATION, "KakaoAK " + adminKey)
+                    .header(HttpHeaders.CONTENT_TYPE, "application/x-www-form-urlencoded")
+                    .bodyValue("target_id_type=user_id&target_id=" + kakaoUserId)
+                    .retrieve()
+                    .onStatus(HttpStatusCode::is4xxClientError, clientResponse -> {
+                        log.error("카카오 Unlink API 요청 실패 (4xx) - kakaoUserId: {}", kakaoUserId);
+                        return Mono.error(new RuntimeException("카카오 Unlink API 요청 실패: " + clientResponse.statusCode()));
+                    })
+                    .onStatus(HttpStatusCode::is5xxServerError, clientResponse -> {
+                        log.error("카카오 Unlink API 서버 오류 (5xx) - kakaoUserId: {}", kakaoUserId);
+                        return Mono.error(new RuntimeException("카카오 Unlink API 서버 오류: " + clientResponse.statusCode()));
+                    })
+                    .bodyToMono(String.class)
+                    .block();
+
+            log.info("카카오 강제 연결 끊기 완료 - kakaoUserId: {}, response: {}", kakaoUserId, response);
+
+
+        } catch (Exception e){
+            log.error("카카오 연결 끊기 실패 - userId", e);
+        }
+    }
+
+}

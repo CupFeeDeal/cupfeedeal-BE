@@ -1,0 +1,70 @@
+package com.cupfeedeal.domain.User.entity;
+
+import com.cupfeedeal.domain.Cupcat.entity.Cupcat;
+import com.cupfeedeal.domain.Cupcat.entity.UserCupcat;
+import com.cupfeedeal.domain.UserSubscription.entity.UserSubscription;
+import com.cupfeedeal.global.BaseEntity;
+import jakarta.persistence.*;
+import lombok.*;
+import org.hibernate.annotations.Where;
+import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.core.userdetails.UserDetails;
+
+import java.io.Serializable;
+import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.List;
+
+@Entity
+@NoArgsConstructor(access = AccessLevel.PUBLIC)
+@AllArgsConstructor
+@Getter
+@Setter
+@Builder
+@EqualsAndHashCode(of="userId")
+@Where(clause = "deleted_at IS NULL")
+@Table(name="user")
+public class User extends BaseEntity implements UserDetails {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long userId;
+
+    @Column(name = "kakao_user_id", unique = true)
+    private Long kakaoUserId;
+
+    @Column(name = "nickname", nullable = false, length = 50)
+    private String username;
+
+    @Column(name = "phone_num", nullable = true, length = 20)
+    private String phone_num;
+
+    @Column(name = "email", nullable = true, length = 100)
+    private String email;
+
+    @Column(name = "user_level", columnDefinition = "Integer default 0")
+    private Integer user_level; // 0, 1, 2, 3, 4, 5 중 하나
+
+    @Column(name = "paw_count")
+    private Integer pawCount = 0; // 0, 1, 2, 3 중 하나
+
+    @Override
+    public Collection<? extends GrantedAuthority> getAuthorities() {
+        return List.of(new SimpleGrantedAuthority("ROLE_USER"));
+    }
+
+    @PrePersist
+    public void prePersist() {
+        if (pawCount == null) {
+            pawCount = 0;
+        }
+    }
+
+    @Override
+    public String getPassword() {
+        return null;
+    }
+
+}
