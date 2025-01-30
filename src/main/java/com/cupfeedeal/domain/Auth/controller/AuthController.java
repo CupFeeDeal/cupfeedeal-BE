@@ -75,7 +75,7 @@ public class AuthController {
     public CommonResponse<?> withdraw(@AuthenticationPrincipal CustomUserdetails customUserDetails, HttpServletRequest request) {
         Long userId = customUserDetails.getUserId();
 
-        authService.withdraw(userId, request);
+        authService.withdraw(userId);
 
         return new CommonResponse<>(null, "회원 탈퇴가 완료되었습니다.");
     }

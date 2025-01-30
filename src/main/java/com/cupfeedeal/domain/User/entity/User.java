@@ -6,6 +6,7 @@ import com.cupfeedeal.domain.UserSubscription.entity.UserSubscription;
 import com.cupfeedeal.global.BaseEntity;
 import jakarta.persistence.*;
 import lombok.*;
+import org.hibernate.annotations.Where;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.userdetails.UserDetails;
@@ -23,12 +24,16 @@ import java.util.List;
 @Setter
 @Builder
 @EqualsAndHashCode(of="userId")
+@Where(clause = "deleted_at IS NULL")
 @Table(name="user")
 public class User extends BaseEntity implements UserDetails {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long userId;
+
+    @Column(name = "kakao_user_id", unique = true)
+    private Long kakaoUserId;
 
     @Column(name = "nickname", nullable = false, length = 50)
     private String username;

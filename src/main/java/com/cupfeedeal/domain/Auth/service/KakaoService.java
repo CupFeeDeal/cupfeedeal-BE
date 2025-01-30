@@ -27,14 +27,20 @@ public class KakaoService {
     private String clientId;
     private final String KAUTH_TOKEN_URL_HOST;
     private final String KAUTH_USER_URL_HOST;
+    private final String KAUTH_UNLINK_URL;
+    private final String KAUTH_USER_INFO_URL;
     private UserRepository userRepository;
+    private String adminKey;
 
     @Autowired
-    public KakaoService(@Value("${spring.kakao.client_id}") String clientId, UserRepository userRepository) {
+    public KakaoService(@Value("${spring.kakao.client_id}") String clientId, UserRepository userRepository, @Value("${spring.kakao.admin_key}") String adminKey) {
         this.clientId = clientId;
         KAUTH_TOKEN_URL_HOST ="https://kauth.kakao.com";
         KAUTH_USER_URL_HOST = "https://kapi.kakao.com";
+        KAUTH_UNLINK_URL = "https://kapi.kakao.com/v1/user/unlink";
+        KAUTH_USER_INFO_URL = "https://kapi.kakao.com/v2/user/me";
         this.userRepository = userRepository;
+        this.adminKey = adminKey;
     }
 
     public String getAccessTokenFromKakao(String code, String redirectUri) {
@@ -93,32 +99,36 @@ public class KakaoService {
         return userInfo;
     }
 
-    public void unlinkKakaoAccount(Long userId, HttpServletRequest request) {
-        String kakaoUnlinkUrl = "https://kapi.kakao.com/v1/user/unlink";
+    public void unlinkKakaoAccount(Long kakaoUserId) {
 
         try{
-            String authorizationHeader = request.getHeader(HttpHeaders.AUTHORIZATION);
 
-            if (authorizationHeader == null || !authorizationHeader.startsWith("Bearer ")) {
-                log.error("유효한 카카오 Access Token이 없습니다 - userId: {}", userId);
-                return;
-            }
+            log.info("카카오 강제 연결 끊기 요청 - kakaoUserId: {}", kakaoUserId);
 
-            String accessToken = authorizationHeader.substring(7);
-
-            String response = WebClient.create(KAUTH_USER_URL_HOST)
+            String response = WebClient.create()
                     .post()
-                    .uri(kakaoUnlinkUrl)
-                    .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken) // ✅ 올바른 카카오 Access Token 사용
+                    .uri(KAUTH_UNLINK_URL)
+                    .header(HttpHeaders.AUTHORIZATION, "KakaoAK " + adminKey)
+                    .header(HttpHeaders.CONTENT_TYPE, "application/x-www-form-urlencoded")
+                    .bodyValue("target_id_type=user_id&target_id=" + kakaoUserId)
                     .retrieve()
+                    .onStatus(HttpStatusCode::is4xxClientError, clientResponse -> {
+                        log.error("카카오 Unlink API 요청 실패 (4xx) - kakaoUserId: {}", kakaoUserId);
+                        return Mono.error(new RuntimeException("카카오 Unlink API 요청 실패: " + clientResponse.statusCode()));
+                    })
+                    .onStatus(HttpStatusCode::is5xxServerError, clientResponse -> {
+                        log.error("카카오 Unlink API 서버 오류 (5xx) - kakaoUserId: {}", kakaoUserId);
+                        return Mono.error(new RuntimeException("카카오 Unlink API 서버 오류: " + clientResponse.statusCode()));
+                    })
                     .bodyToMono(String.class)
                     .block();
 
+            log.info("카카오 강제 연결 끊기 완료 - kakaoUserId: {}, response: {}", kakaoUserId, response);
+
+
         } catch (Exception e){
-            log.error("카카오 연결 끊기 실패 - userId: {}", userId, e);
+            log.error("카카오 연결 끊기 실패 - userId", e);
         }
     }
-
-
 
 }
