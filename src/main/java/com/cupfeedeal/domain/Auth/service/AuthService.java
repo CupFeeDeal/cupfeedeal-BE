@@ -44,6 +44,12 @@ public class AuthService {
                 user.setKakaoUserId(userInfoResponseDto.getId());
                 userRepository.save(user);
             }
+            // soft 삭제된 계정일 경우 계정 복구
+            if (user.getDeletedAt() != null){
+                user.setDeletedAt(null);
+                user.setKakaoUserId(userInfoResponseDto.getId());
+                userRepository.save(user);
+            }
 
             String token = jwtTokenProvider.createToken(user.getUserId());
 
@@ -103,7 +109,6 @@ public class AuthService {
         User user = userRepository.findByUserId(userId)
                 .orElseThrow(() -> new ApplicationException(ExceptionCode.USER_NOT_FOUND));
 
-//        user.setDeletedAt(LocalDateTime.now());
         user.setDeletedAt(LocalDateTime.now(ZoneId.of("Asia/Seoul")));
         userRepository.save(user);
 
