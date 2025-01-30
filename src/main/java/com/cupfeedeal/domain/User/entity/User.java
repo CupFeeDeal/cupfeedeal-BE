@@ -30,6 +30,9 @@ public class User extends BaseEntity implements UserDetails {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long userId;
 
+    @Column(name = "kakao_user_id", unique = true)
+    private Long kakaoUserId;
+
     @Column(name = "nickname", nullable = false, length = 50)
     private String username;
 

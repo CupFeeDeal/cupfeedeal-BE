@@ -40,6 +40,10 @@ public class AuthService {
         if (userRepository.findByEmail(userInfoResponseDto.getKakaoAccount().email).isPresent()) {
             User user = userRepository.findByEmail(userInfoResponseDto.getKakaoAccount().email).get();
             Integer subscription_count = userSubscriptionRepository.findAllByUser(user).size();
+            if(user.getKakaoUserId() == null) {
+                user.setKakaoUserId(userInfoResponseDto.getId());
+                userRepository.save(user);
+            }
 
             String token = jwtTokenProvider.createToken(user.getUserId());
 
@@ -56,6 +60,7 @@ public class AuthService {
                     .build();
             return loginResponseDto;
         }
+
         // 아직 회원이 아닌 경우
         else {
             //회원으로 등록
@@ -63,6 +68,7 @@ public class AuthService {
                     .username(userInfoResponseDto.kakaoAccount.profile.nickname)
                     .email(userInfoResponseDto.kakaoAccount.email)
                     .user_level(0)
+                    .kakaoUserId(userInfoResponseDto.getId())
                     .build();
 
             userRepository.save(user);
@@ -93,7 +99,7 @@ public class AuthService {
     }
 
     @Transactional
-    public void withdraw(Long userId, HttpServletRequest request){
+    public void withdraw(Long userId){
         User user = userRepository.findByUserId(userId)
                 .orElseThrow(() -> new ApplicationException(ExceptionCode.USER_NOT_FOUND));
 
@@ -101,7 +107,11 @@ public class AuthService {
         user.setDeletedAt(LocalDateTime.now(ZoneId.of("Asia/Seoul")));
         userRepository.save(user);
 
-        kakaoService.unlinkKakaoAccount(userId, request);
+        if (user.getKakaoUserId() != null) {
+            kakaoService.unlinkKakaoAccount(user.getKakaoUserId());
+        } else {
+            log.warn("카카오 사용자 ID가 없습니다 - userId: {}", userId);
+        }
     }
 
 }
