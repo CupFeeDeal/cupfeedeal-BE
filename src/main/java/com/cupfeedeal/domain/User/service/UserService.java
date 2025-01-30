@@ -43,7 +43,7 @@ public class UserService {
     }
 
     public UserInfoUpdateResponseDto updateUserInfo(CustomUserdetails customUserdetails, String newUsername) {
-        User user = customUserdetails.getUser();
+        User user = customUserDetailService.loadUserByCustomUserDetails(customUserdetails);
         user.setUsername(newUsername);
         userRepository.save(user);
 

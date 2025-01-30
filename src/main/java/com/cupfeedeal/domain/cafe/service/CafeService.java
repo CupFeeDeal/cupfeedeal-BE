@@ -3,6 +3,8 @@ package com.cupfeedeal.domain.cafe.service;
 import com.cupfeedeal.domain.User.entity.CustomUserdetails;
 import com.cupfeedeal.domain.User.entity.User;
 import com.cupfeedeal.domain.UserCafeLike.repository.UserCafeLikeRepository;
+import com.cupfeedeal.domain.UserSubscription.enumerate.SubscriptionStatus;
+import com.cupfeedeal.domain.UserSubscription.repository.UserSubscriptionRepository;
 import com.cupfeedeal.domain.cafe.dto.request.CafeCreateRequestDto;
 import com.cupfeedeal.domain.cafe.dto.response.CafeInfoResponseDto;
 import com.cupfeedeal.domain.cafe.dto.response.CafeListResponseDto;
@@ -22,6 +24,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 @Service
@@ -33,6 +36,7 @@ public class CafeService {
     private final CafeImageService cafeImageService;
     private final CafeImageRepository cafeImageRepository;
     private final UserCafeLikeRepository userCafeLikeRepository;
+    private final UserSubscriptionRepository userSubscriptionRepository;
 
     public Cafe findCafeById(Long id) {
         return cafeRepository.findById(id)
@@ -103,10 +107,15 @@ public class CafeService {
         // 카페 저장 여부 반환
         Boolean is_like = (user != null) && userCafeLikeRepository.findByUserAndCafe(user, cafe).isPresent();
 
-        // 카페 구독 여부 반환
-        Boolean is_subscribed = false;
+        List<SubscriptionStatus> statuses = Arrays.asList(SubscriptionStatus.VALID, SubscriptionStatus.NOTYET);
 
-        return CafeInfoResponseDto.from(cafe, cafeImageResponseDtoList, is_like, is_subscribed);
+        // 카페 구독 여부 반환
+        Boolean is_subscribed = userSubscriptionRepository.findTop1ByUserAndCafeAndStatus(user, cafe, statuses).isPresent();
+
+        // 연장이 아니고, 구독권이 이미 3개인지 여부 반환
+        Boolean is_full_subscriptions = (user != null) && userSubscriptionRepository.countByUserAndSubscriptionStatusIsValidOrNotYet(user, statuses) == 3 && !is_subscribed;
+
+        return CafeInfoResponseDto.from(cafe, cafeImageResponseDtoList, is_like, is_subscribed, is_full_subscriptions);
     }
 
     /*

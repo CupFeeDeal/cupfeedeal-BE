@@ -63,7 +63,7 @@ public class UserSubscriptionService {
 
     public List<PaymentHistoryResponseDto> getUserPaymentHistory(CustomUserdetails customUserdetails) {
 
-        User user = customUserdetails.getUser();
+        User user = customUserDetailService.loadUserByCustomUserDetails(customUserdetails);
 
         List<UserSubscription> userSubscriptions = userSubscriptionRepository.findAllByUser(user);
         List<PaymentHistoryResponseDto> responseList = new ArrayList<>();
@@ -252,12 +252,17 @@ public class UserSubscriptionService {
         Boolean isGettingPaw = isGettingPaw(userSubscription);
 
         // pawCount + 1
+        Integer pawCount = user.getPawCount();
         if (isGettingPaw) {
-            user.setPawCount(user.getPawCount() + 1);
+            pawCount++;
+            user.setPawCount(pawCount);
             userRepository.save(user);
         }
 
-        return UserSubscriptionUseResponseDto.from(isGettingPaw);
+        // 아낀 잔 수 계산
+        Double saved_cups = getSavedCups(userSubscription.getCafeSubscriptionType(), userSubscription.getUsingCount());
+
+        return UserSubscriptionUseResponseDto.from(isGettingPaw, saved_cups, pawCount);
     }
 
     /*
@@ -306,11 +311,11 @@ public class UserSubscriptionService {
     cafe의 cafeSubscriptionType info 조회
      */
     public CafeSubscriptionInfoResponseDto getCafeSubscriptionType(CustomUserdetails customUserdetails, CafeSubscriptionTypeInfoRequestDto cafeSubscriptionTypeInfo) {
-        Long id = cafeSubscriptionTypeInfo.id();
+        Long id = cafeSubscriptionTypeInfo.id(); // cafeId 또는 userSubscriptionId
         Boolean isExtension = cafeSubscriptionTypeInfo.isExtension();
 
         if (!isExtension) {
-            return getCafeSubscriptionTypeWithoutExtension(id);
+            return getCafeSubscriptionTypeWithoutExtension(customUserdetails, id);
         } else {
             return getCafeSubscriptionTypeWithExtension(customUserdetails, id);
         }
@@ -319,9 +324,20 @@ public class UserSubscriptionService {
     /*
     구독중이 아닌 경우 cafeSubscriptionType 조회
      */
-    public CafeSubscriptionInfoResponseDto getCafeSubscriptionTypeWithoutExtension(Long cafeId) {
+    public CafeSubscriptionInfoResponseDto getCafeSubscriptionTypeWithoutExtension(CustomUserdetails customUserdetails, Long cafeId) {
+        User user = customUserdetails.getUser();
+
         Cafe cafe = cafeService.findCafeById(cafeId);
         List<CafeSubscriptionType> cafeSubscriptionTypeList = cafeSubscriptionTypeRepository.findAllByCafeId(cafeId);
+
+        // 실제로 해당 카페에 구독권이 있는지 여부 반환
+        List<SubscriptionStatus> statuses = Arrays.asList(SubscriptionStatus.VALID, SubscriptionStatus.NOTYET);
+        Optional<UserSubscription> existingUserSubscription = userSubscriptionRepository.findTop1ByUserAndCafeAndStatus(user, cafe, statuses);
+
+        // isExtension = false 인데 실제로는 구독권이 있는 경우 에러 반환
+        if (existingUserSubscription.isPresent()) {
+            throw new ApplicationException(ExceptionCode.ALREADY_SUBSCRIBED_CAFE);
+        }
 
         // cafeSubscriptionType list를 dto로 변환
         List<CafeSubscriptionListResponseDto> cafeSubscriptionListResponseDtoList = cafeSubscriptionTypeList.stream()
@@ -329,6 +345,13 @@ public class UserSubscriptionService {
                 .toList();
 
         return CafeSubscriptionInfoResponseDto.from(cafe, null, cafeSubscriptionListResponseDtoList);
+    }
+
+    Optional<UserSubscription> findUserSubscription(CustomUserdetails customUserdetails, Cafe cafe) {
+        User user = customUserDetailService.loadUserByCustomUserDetails(customUserdetails);
+
+        List<SubscriptionStatus> statuses = Arrays.asList(SubscriptionStatus.VALID, SubscriptionStatus.NOTYET);
+        return userSubscriptionRepository.findTop1ByUserAndCafeAndStatus(user, cafe, statuses);
     }
 
     /*
@@ -339,6 +362,15 @@ public class UserSubscriptionService {
         CafeSubscriptionType cafeSubscriptionType = userSubscription.getCafeSubscriptionType();
         Cafe cafe = cafeSubscriptionType.getCafe();
 
+        // 실제로 해당 카페에 구독권이 있는지 여부 반환
+        Boolean existingUserSubscription = findUserSubscription(customUserdetails, cafe).isPresent();
+
+        // isExtension = true인데 실제로 구독권이 존재하지 않는 경우 에러 반환
+        if (!existingUserSubscription) {
+            throw new ApplicationException(ExceptionCode.NOT_FOUND_USER_SUBSCRIPTION);
+        }
+
+        // 해당 카페의 모든 cafeSubscriptionType 조회
         List<CafeSubscriptionType> cafeSubscriptionTypeList = cafeSubscriptionTypeRepository.findAllByCafe(cafe);
 
         // cafeSubscriptionType list를 dto로 변환
@@ -349,10 +381,6 @@ public class UserSubscriptionService {
         // 구독권 정보를 dto로 변환
         UserSubscriptionInfoResponseDto userSubscriptionInfo = UserSubscriptionInfoResponseDto.from(userSubscription, cafeSubscriptionType);
 
-        // 인증되지 않은 사용자 로직
-        if (customUserdetails == null) {
-            return CafeSubscriptionInfoResponseDto.from(cafe, null, cafeSubscriptionListResponseDtoList);
-        }
 
         return CafeSubscriptionInfoResponseDto.from(cafe, userSubscriptionInfo, cafeSubscriptionListResponseDtoList);
     }
@@ -361,7 +389,7 @@ public class UserSubscriptionService {
     구독 취소
      */
     @Transactional
-    public void cancelSubscription(Long userSubscriptionId) {
+    public UserSubscriptionCancelResponseDto cancelSubscription(Long userSubscriptionId) {
         UserSubscription userSubscription = findUserSubscriptionById(userSubscriptionId);
         User user = userSubscription.getUser();
         CafeSubscriptionType cafeSubscriptionType = userSubscription.getCafeSubscriptionType();
@@ -369,6 +397,13 @@ public class UserSubscriptionService {
         // 상태 취소로 변경
         userSubscription.setSubscriptionStatus(SubscriptionStatus.CANCELED);
         userSubscriptionRepository.save(userSubscription);
+
+        // user level - 1
+        user.setUser_level(user.getUser_level() - 1);
+
+        // user cupcat 삭제
+        UserCupcat userCupcat = userCupcatRepository.findTop1ByUserOrderByCreatedAtDesc(user).get();
+        userCupcat.setDeletedAt(LocalDateTime.now());
 
         // 해당 구독권으로 발자국이 찍힌 경우 발자국 count - 1
         Boolean deletePaw = !cafeSubscriptionType.getBreakDays().isEmpty()
@@ -378,5 +413,7 @@ public class UserSubscriptionService {
             user.setPawCount(user.getPawCount() - 1);
             userRepository.save(user);
         }
+
+        return UserSubscriptionCancelResponseDto.from(user);
     }
 }
